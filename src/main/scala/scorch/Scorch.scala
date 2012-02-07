@@ -1,3 +1,6 @@
+// Copyright (c) 2012, David Jeffery
+// All rights reserved.
+
 package scorch
 
 import scalaz._

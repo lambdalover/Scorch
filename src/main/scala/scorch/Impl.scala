@@ -6,27 +6,38 @@ package scorch
 import scalaz._
 import Scalaz._
 
-object Foo {
-  def listmonad = implicitly[Monad[List]]
+object ContinuationMonad {
+  type Continuation[K,A] = (A=>K)=>K
+  implicit def ContinuationM[K]:Monad[({type l[A] = Continuation[K,A]})#l] = 
+  		new Monad[({type l[A] = Continuation[K,A]})#l] {
+    override def pure[A](a: => A) = (f => f(a))
+    override def bind[A, B](p: Continuation[K,A], h:A=>Continuation[K,B]) = 
+    	bk => p(a => h(a)(bk))
+  }
+  def callCC[K, A, B](f: (A => Continuation[K, B]) => Continuation[K, A]): Continuation[K, A] =
+    (k => f(a => (_ => k(a)))(k))
+  
 }
 
 object Impl extends Scorch {
-  type SC[A] = List[A]
-  implicit def SCMonad[A]:Monad[SC] = Foo.listmonad
-
   def UNDEFINED[T]:T = error("UNDEFINED")
 
-      // result already defined in Monad[_]?
-  def result[A](a:A):SC[A] = List(a)
-  def stop[A]:SC[A] = UNDEFINED
+  import ContinuationMonad._
+
+  type SC[A] = Continuation[Unit,A]
+  implicit def SCMonad[A]:Monad[SC] = ContinuationM
+
+      // why do we need the 'implicitly'?
+  def result[A](a:A):SC[A] = implicitly[Monad[SC]].pure(a)
+  def stop[A]:SC[A] = _ => result(())
   def eagerly[A](a:SC[A]):SC[SC[A]] = UNDEFINED
   def liftIO[A](a:IO[A]):SC[A] = UNDEFINED
   def runSC[A](a:SC[A]):IO[Unit] = UNDEFINED
 
   def par[A](p:SC[A], q:SC[A]):SC[A]= UNDEFINED
   def append[A](p:SC[A], q:SC[A]):SC[A]= UNDEFINED
-    // >>= already defined in Monad[_]?
-  def bind[A,B](p:SC[A], f:A=>SC[B]):SC[B]= UNDEFINED
+    // Can delete this?
+  def bind[A,B](p:SC[A], f:A=>SC[B]):SC[B]= implicitly[Monad[SC]].bind(p,f)
 
   // should get the following for free from MonadPlus/Applicative?
   def guard(b:Boolean):SC[Unit]= UNDEFINED
