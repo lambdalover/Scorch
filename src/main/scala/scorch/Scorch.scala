@@ -7,6 +7,9 @@ import scalaz._
 import Scalaz._
 
 trait Scorch {
+  val io:IOModule
+  import io._
+
     // there is a type SC[A]
   type SC[A]  
     // and there is a monad instance (implicit) for it
@@ -21,8 +24,8 @@ trait Scorch {
 
   def par[A](p:SC[A], q:SC[A]):SC[A]
   def append[A](p:SC[A], q:SC[A]):SC[A]
-    // >>= already defined in Monad[_]?
-  def bind[A,B](p:SC[A], f:A=>SC[B]):SC[B]
+    // not sure this is really needed as it's forwarding on an implicit...
+  def bind[A,B](p:SC[A], f:A=>SC[B]):SC[B]= implicitly[Monad[SC]].bind(p,f)
 
   // should get the following for free from MonadPlus/Applicative?
   def guard(b:Boolean):SC[Unit]
@@ -52,14 +55,22 @@ trait Scorch {
     } yield ro
   def const[A,B] = (a:A)=>(b:B)=>a
 
-    // define some of the above as operators
+  def delay(l:Long):SC[Unit] = liftIO(threadDelay(l))
+
+  def printSC[A](a:SC[A]):IO[Unit] =
+  	runSC(for {
+		x <- a
+		_ <- liftIO(putStrLn("Ans = " ++ a.toString))
+	} yield ())
+
+    // operator versions of the above, and some other useful operators
   class SCOperator[A](val p:SC[A]) {
     def <|>(q:SC[A]):SC[A] = par(p,q)
     def <+>(q:SC[A]):SC[A] = append(p,q)
     def >>=[B](f:A=>SC[B]):SC[B] = bind(p,f)
       // is this correct, or do we get repeated qs?
     def >>[B](q:SC[B]):SC[B] = p >>= (_=>q) 
-    def butAfter(d:Double, q:SC[A]):SC[A] = cut(p <|> (delay(d) >> q))
+    def butAfter(l:Long, q:SC[A]):SC[A] = cut(p <|> (delay(l) >> q))
     def orElse(q:SC[A]):SC[A] = for {
   		tripwire <- liftIO(newEmptyMVar[Unit])
 		a <- (for {
@@ -70,35 +81,9 @@ trait Scorch {
 				theRest <- (if (triggered == None) q else stop)
 			} yield theRest)
 	} yield a
-    def notBefore(w:Double):SC[A] = sync(const[A,Unit], p, delay(w))
+    def notBefore(w:Long):SC[A] = sync(const[A,Unit], p, delay(w))
   }
   implicit def SCOperator[A](sc:SC[A]):SCOperator[A] = new SCOperator[A](sc)
-
-  type IO[A] 
-  implicit def IOMonad[A]:Monad[IO]
-
-  type MVar[A]
-  def newEmptyMVar[A]:IO[MVar[A]]
-  def takeMVar[A](m:MVar[A]):IO[A]
-  def putMVar[A](m:MVar[A], a:A):IO[Unit]
-  def tryPutMVar[A](m:MVar[A], a:A):IO[Unit]
-  def tryTakeMVar[A](m:MVar[A]):IO[Option[A]]
-
-  type TVar[A]
-  def newTVar[A](a:A):IO[TVar[A]]
-  def modifyTVar[A](t:TVar[A],f:A=>A):IO[(A,A)]
-  def readTVar[A](t:TVar[A]):IO[A] = for (c <- modifyTVar(t, id[A])) yield c._2
-  
-  def putStrLn(s:String):IO[Unit]
-
-  def threadDelay(d:Double):IO[Unit]
-  def delay(d:Double):SC[Unit] = liftIO(threadDelay(d))
-
-  def printSC[A](a:SC[A]):IO[Unit] =
-  	runSC(for {
-		x <- a
-		_ <- liftIO(putStrLn("Ans = " ++ a.toString))
-	} yield ())
 
     // why do we need to declare the type variable binding for 'stop'?
   def liftList[A](as:List[A]):SC[A] = as.map(result).foldRight(stop[A])(_ <|> _)
@@ -112,7 +97,34 @@ trait Scorch {
     } yield x
 }
 
+trait IOModule {
+  type IO[A] 
+  implicit def IOMonad[A]:Monad[IO]
+
+  def result[A](a:A):IO[A] = implicitly[Monad[IO]].pure(a)
+
+  def unsafePerformIO[A](sideAffectingCode: =>A):IO[A]
+
+  type MVar[A]
+  def newEmptyMVar[A]:IO[MVar[A]]
+  def takeMVar[A](m:MVar[A]):IO[A]
+  def putMVar[A](m:MVar[A], a:A):IO[Unit]
+  def tryPutMVar[A](m:MVar[A], a:A):IO[Unit]
+  def tryTakeMVar[A](m:MVar[A]):IO[Option[A]]
+
+  type TVar[A]
+  def newTVar[A](a:A):IO[TVar[A]]
+  def modifyTVar[A](t:TVar[A],f:A=>A):IO[(A,A)]
+  def readTVar[A](t:TVar[A]):IO[A] = for (c <- modifyTVar(t, id[A])) yield c._2
+  
+  def putStrLn(s:String):IO[Unit] = unsafePerformIO(Console.println(s))
+
+  def threadDelay(l:Long):IO[Unit]
+}
+
 trait Examples extends Scorch {
+  import io._
+
   def fplang = for (
   	w <- result("Scala") <|> result("Haskell") <|> result("OCaml")
   ) yield (w ++ " is great!")
