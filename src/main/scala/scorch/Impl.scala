@@ -67,23 +67,65 @@ object IOImpl extends IOModule {
   import scala.actors.Actor
   import scala.actors.Actor._
 
-  type MVar[A]= {} // dummy
-  def newEmptyMVar[A]:IO[MVar[A]] = UNDEFINED
-  def takeMVar[A](m:MVar[A]):IO[A] = UNDEFINED
-  def putMVar[A](m:MVar[A], a:A):IO[Unit] = UNDEFINED
-  def tryPutMVar[A](m:MVar[A], a:A):IO[Unit] = UNDEFINED
-  def tryTakeMVar[A](m:MVar[A]):IO[Option[A]] = UNDEFINED
+  trait MVarInstruction[A]
+  case class Put[A](a:A) extends MVarInstruction[A]
+  case class Take[A] extends MVarInstruction[A]
+  case class TryPut[A](a:A) extends MVarInstruction[A]
+  case class TryTake[A] extends MVarInstruction[A]
+  class MVar[A] extends Actor {
+  	var st:Option[A] = None
+	def act() {
+		loop { if (st == None) react(acceptPut) else react(acceptTake) }
+	}
+	def acceptPut:PartialFunction[Any,Unit] = {
+		case Put(a) => { 
+			st = Some[A](a.asInstanceOf[A])
+			reply(())
+		}
+		case TryPut(a) => { 
+			st = Some[A](a.asInstanceOf[A])
+			reply(())
+		}
+		case TryTake => { 
+			reply(None)
+		}
+	}
+	def acceptTake:PartialFunction[Any,Unit] = {
+		case Take => { 
+			val oldst = st
+			st = None
+			reply(oldst.get)
+		}
+		case TryPut(a) => { 
+			reply(())
+		}
+		case TryTake => { 
+			val oldst = st
+			st = None
+			reply(oldst)
+		}
+	}
+	def putMVar[A](a:A):Unit = (self !? Put[A](a)).asInstanceOf[Unit]
+	def takeMVar[A]:A = (self !? Take).asInstanceOf[A]
+	def tryPutMVar[A](a:A):Unit = (self !? TryPut[A](a)).asInstanceOf[Unit]
+	def tryTakeMVar[A]:Option[A] = (self !? TryTake).asInstanceOf[Option[A]]
+  }
+  def newEmptyMVar[A]:IO[MVar[A]] = unsafePerformIO(new MVar[A]())
+  def putMVar[A](m:MVar[A], a:A):IO[Unit] = unsafePerformIO(m.putMVar(a))
+  def takeMVar[A](m:MVar[A]):IO[A] = unsafePerformIO(m.takeMVar)
+  def tryPutMVar[A](m:MVar[A], a:A):IO[Unit] = unsafePerformIO(m.tryPutMVar(a))
+  def tryTakeMVar[A](m:MVar[A]):IO[Option[A]] = unsafePerformIO(m.tryTakeMVar)
 
   class TVar[A](a:A) extends Actor {
   	var st:A = a
 	def act() {
-		react {
+		loop { react {
 			case f:(A=>A) => { 
 				val oldst = st;
 				st = f(a); 
 				reply((oldst,st));
 			}
-		}
+		} }
 	}
 	def modify(f:A=>A):(A,A) = (self !? f).asInstanceOf[(A,A)]
   }

@@ -107,8 +107,8 @@ trait IOModule {
 
   type MVar[A]
   def newEmptyMVar[A]:IO[MVar[A]]
-  def takeMVar[A](m:MVar[A]):IO[A]
   def putMVar[A](m:MVar[A], a:A):IO[Unit]
+  def takeMVar[A](m:MVar[A]):IO[A]
   def tryPutMVar[A](m:MVar[A], a:A):IO[Unit]
   def tryTakeMVar[A](m:MVar[A]):IO[Option[A]]
 
