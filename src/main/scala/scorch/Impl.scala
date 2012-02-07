@@ -1,16 +1,23 @@
+// Copyright (c) 2012, David Jeffery
+// All rights reserved.
+
 package scorch
 
 import scalaz._
 import Scalaz._
 
+object Foo {
+  def listmonad = implicitly[Monad[List]]
+}
+
 object Impl extends Scorch {
   type SC[A] = List[A]
-  implicit def SCMonad[A]:Monad[SC] = UNDEFINED
+  implicit def SCMonad[A]:Monad[SC] = Foo.listmonad
 
-  def UNDEFINED[T]:T = error("NYI")
+  def UNDEFINED[T]:T = error("UNDEFINED")
 
       // result already defined in Monad[_]?
-  def result[A](a:A):SC[A] = UNDEFINED
+  def result[A](a:A):SC[A] = List(a)
   def stop[A]:SC[A] = UNDEFINED
   def eagerly[A](a:SC[A]):SC[SC[A]] = UNDEFINED
   def liftIO[A](a:IO[A]):SC[A] = UNDEFINED
