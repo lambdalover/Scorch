@@ -40,8 +40,13 @@ object Impl extends Scorch {
     // helper fn
   def doNothing:IO[Unit] = implicitly[Monad[IO]].pure(())
 
-  def par[A](p:SC[A], q:SC[A]):SC[A]= UNDEFINED
-  def append[A](p:SC[A], q:SC[A]):SC[A]= UNDEFINED
+  def par[A](p:SC[A], q:SC[A]):SC[A]= k => (forkActor(p(k)) >> q(k))
+  def append[A](p:SC[A], q:SC[A]):SC[A]= k => for {
+		g  <- newGroup
+		_  <- g.local(forkActor(p(k)))
+		_  <- g.finished
+		qq <- q(k)
+	} yield qq
 
     // should get this for free from MonadPlus/Applicative or somesuch?
   def guard(b:Boolean):SC[Unit]= if (b) result(()) else stop
@@ -62,10 +67,10 @@ object IOImpl extends IOModule {
   def unsafePerformIO[A](sideAffectingCode: =>A):IO[A] = 
   	implicitly[Monad[IO]].pure(sideAffectingCode)
 
-  def toplevelRunIO[A](io:IO[A]):A = io(()) // XXX should run in separate actor?
-
   import scala.actors.Actor
   import scala.actors.Actor._
+
+  def toplevelRunIO[A](io:IO[A]):A = io(()) // XXX should run in separate actor?
 
   trait MVarInstruction[A]
   case class Put[A](a:A) extends MVarInstruction[A]
@@ -94,7 +99,7 @@ object IOImpl extends IOModule {
 		case Take => { 
 			val oldst = st
 			st = None
-			reply(oldst.get)
+			reply(oldst.get) // accepting 'Take' so oldst!=None
 		}
 		case TryPut(a) => { 
 			reply(())
@@ -147,4 +152,14 @@ object IOImpl extends IOModule {
 	ac !? w
 	()
   })
+
+	  // XXX should run in separate actor?
+  //def toplevelRunIO[A](io:IO[A]):A = io(()) 
+  def forkActor(io:IO[Unit]):IO[Unit] =unsafePerformIO(actor(toplevelRunIO(io)))
+
+  class GroupImpl extends Group {
+    def local:IO[Unit]=>IO[Unit] = UNDEFINED
+    def finished:IO[Unit] = UNDEFINED
+  }
+  def newGroup:IO[Group] = UNDEFINED
 }

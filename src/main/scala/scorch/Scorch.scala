@@ -68,7 +68,6 @@ trait Scorch {
     def <|>(q:SC[A]):SC[A] = par(p,q)
     def <+>(q:SC[A]):SC[A] = append(p,q)
     def >>=[B](f:A=>SC[B]):SC[B] = bind(p,f)
-      // is this correct, or do we get repeated qs?
     def >>[B](q:SC[B]):SC[B] = p >>= (_=>q) 
     def butAfter(l:Long, q:SC[A]):SC[A] = cut(p <|> (delay(l) >> q))
     def orElse(q:SC[A]):SC[A] = for {
@@ -84,6 +83,14 @@ trait Scorch {
     def notBefore(w:Long):SC[A] = sync(const[A,Unit], p, delay(w))
   }
   implicit def SCOperator[A](sc:SC[A]):SCOperator[A] = new SCOperator[A](sc)
+    // does this already exist in scalaz?
+
+//  XXX should make these two generic for all Monads.
+//  class PimpMyMonad[M[_],A](val p:M[A], val dict:Monad[M]) {
+//    def >>=[B](f:A=>M[B]):M[B] = dict.bind(p,f)
+//    def >>[B](q:M[B]):M[B] = p >>= (_=>q) 
+//  }
+//  implicit def PimpMyMonad[M[_],A](p:M[A])(implicit dict:Monad[M]):PimpMyMonad[M,A] = new PimpMyMonad[M,A](p, dict)
 
     // why do we need to declare the type variable binding for 'stop'?
   def liftList[A](as:List[A]):SC[A] = as.map(result).foldRight(stop[A])(_ <|> _)
@@ -100,6 +107,13 @@ trait Scorch {
 trait IOModule {
   type IO[A] 
   implicit def IOMonad[A]:Monad[IO]
+
+   // XXX generalise to Monads
+  class IOOperator[A](val p:IO[A]) {
+	  def >>=[B](f:A=>IO[B]):IO[B] = implicitly[Bind[IO]].bind(p,f)
+	  def >>[B](q:IO[B]):IO[B] = p >>= (_=>q) 
+  }
+  implicit def IOOperator[A](io:IO[A]):IOOperator[A] = new IOOperator[A](io)
 
   def result[A](a:A):IO[A] = implicitly[Monad[IO]].pure(a)
 
@@ -120,6 +134,14 @@ trait IOModule {
   def putStrLn(s:String):IO[Unit] = unsafePerformIO(Console.println(s))
 
   def threadDelay(l:Long):IO[Unit]
+
+  def forkActor(io:IO[Unit]):IO[Unit] 
+
+  trait Group  {
+    def local:IO[Unit]=>IO[Unit]
+    def finished:IO[Unit] 
+  }
+  def newGroup:IO[Group] 
 }
 
 trait Examples extends Scorch {
