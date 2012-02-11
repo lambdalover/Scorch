@@ -15,12 +15,20 @@ trait Scorch {
     // and there is a monad instance (implicit) for it
   implicit def SCMonad[A]:Monad[SC]
 
-      // result already defined in Monad[_]?
+/* XXX should be like this:
+  trait LiftIO[M[_]] {
+    def liftIO[A](a:IO[A]):M[A]
+  }
+  implicit def SCLiftIO:LiftIO[SC]
+*/
+  def liftIO[A](a:IO[A]):SC[A]
+
+      // Not needed? result(a) == in Pure[SC].pure(a)
   def result[A](a:A):SC[A]
+
   def stop[A]:SC[A]
   def eagerly[A](a:SC[A]):SC[SC[A]]
-  def liftIO[A](a:IO[A]):SC[A]
-  def runSC[A](a:SC[A]):IO[Unit] // or :Unit?
+  def runSC[A](a:SC[A]):IO[Unit] 
 
   def par[A](p:SC[A], q:SC[A]):SC[A]
   def append[A](p:SC[A], q:SC[A]):SC[A]
@@ -121,10 +129,17 @@ trait IOModule {
 
   type MVar[A]
   def newEmptyMVar[A]:IO[MVar[A]]
+  def newMVar[A](a:A):IO[MVar[A]] = for {
+	  m <- newEmptyMVar[A] 
+	  _ <- putMVar(m,a)
+  } yield m
   def putMVar[A](m:MVar[A], a:A):IO[Unit]
   def takeMVar[A](m:MVar[A]):IO[A]
+  def readMVar[A](m:MVar[A]):IO[A]
   def tryPutMVar[A](m:MVar[A], a:A):IO[Unit]
   def tryTakeMVar[A](m:MVar[A]):IO[Option[A]]
+
+  def atomic[A](m:MVar[Unit])(io:IO[A]):IO[A] 
 
   type TVar[A]
   def newTVar[A](a:A):IO[TVar[A]]
@@ -137,11 +152,42 @@ trait IOModule {
 
   def forkActor(io:IO[Unit]):IO[Unit] 
 
-  trait Group  {
-    def local:IO[Unit]=>IO[Unit]
-    def finished:IO[Unit] 
+  type HIO[A]
+  implicit def HIOMonad[A]:Monad[HIO]
+   // XXX generalise to Monads
+  class HIOOperator[A](val p:HIO[A]) {
+	  def >>=[B](f:A=>HIO[B]):HIO[B] = implicitly[Bind[HIO]].bind(p,f)
+	  def >>[B](q:HIO[B]):HIO[B] = p >>= (_=>q) 
   }
-  def newGroup:IO[Group] 
+  implicit def HIOOperator[A](io:HIO[A]):HIOOperator[A] = new HIOOperator[A](io)
+  def runHIO[A](p:HIO[A]):IO[Unit]
+
+  trait Group  {
+    def increment:IO[Unit]
+    def decrement:IO[Unit]
+    def isZero:IO[Unit]
+
+  // the following are used in the paper, but I am leaving out for now.
+  // the actor-based implementation somewhat obviates the need for this anyway.
+    //def register(e:Entry):IO[Unit]
+    //def killGroup:IO[Unit]
+  }
+  //type Inhabitants = List[Entry]
+  //type Inhabitants = Option[List[Entry]]  // paper says this, not sure why
+  //type Entry = Either[ThreadId, Group]
+  //type ThreadId = Int
+
+  def newPrimGroup:IO[Group]
+
+	//XXX _H
+  def liftIO_H[A](ioa:IO[A]):HIO[A] 
+
+  def forkActorH(hio:HIO[Unit]):HIO[Unit] 
+
+  def newGroup:HIO[Group] 
+  //def close(g:Group):HIO[Unit] 
+  def local[A](g:Group, p:HIO[A]):HIO[A] 
+  def finished(g:Group):HIO[Unit] 
 }
 
 trait Examples extends Scorch {
