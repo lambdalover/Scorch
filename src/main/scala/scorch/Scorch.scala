@@ -7,15 +7,15 @@ import scalaz._
 import Scalaz._
 
 object Pimpz {
-  class MonadOps[M[_]:Monad,A](p:M[A]) {
+  class BindOps[M[_]:Bind,A](p:M[A]) {
       // I would call this '>>=' rather than '>>- to be consistent with
       // Haskell but this casuses some problems as operators ending in '='
       // are treated specially in Scala.
       // (would =>> be a better operator name?)
-    def >>-[B](f:A=>M[B]):M[B] = implicitly[Monad[M]].bind(p,f)
+    def >>-[B](f:A=>M[B]):M[B] = implicitly[Bind[M]].bind(p,f)
     def >>[B](q:M[B]):M[B] = p >>- (_=>q) 
   }
-  implicit def MonadOps[M[_]:Monad,A](p:M[A]):MonadOps[M,A] = new MonadOps[M,A](p)
+  implicit def BindOps[M[_]:Bind,A](p:M[A]):BindOps[M,A] = new BindOps[M,A](p)
 }
 
 import Pimpz._
