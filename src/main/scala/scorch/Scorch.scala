@@ -6,7 +6,22 @@ package scorch
 import scalaz._
 import Scalaz._
 
+object Pimpz {
+  class MonadOps[M[_]:Monad,A](p:M[A]) {
+      // I would call this '>>=' rather than '>>- to be consistent with
+      // Haskell but this casuses some problems as operators ending in '='
+      // are treated specially in Scala.
+      // (would =>> be a better operator name?)
+    def >>-[B](f:A=>M[B]):M[B] = implicitly[Monad[M]].bind(p,f)
+    def >>[B](q:M[B]):M[B] = p >>- (_=>q) 
+  }
+  implicit def MonadOps[M[_]:Monad,A](p:M[A]):MonadOps[M,A] = new MonadOps[M,A](p)
+}
+
+import Pimpz._
+
 trait Scorch {
+
   val io:IOModule
   import io._
 
@@ -19,7 +34,7 @@ trait Scorch {
   trait LiftIO[M[_]] {
     def liftIO[A](a:IO[A]):M[A]
   }
-  implicit def SCLiftIO:LiftIO[SC]
+  implicit def SCLiftIOLiftIO[SC]
 */
   def liftIO[A](a:IO[A]):SC[A]
 
@@ -75,8 +90,6 @@ trait Scorch {
   class SCOperator[A](val p:SC[A]) {
     def <|>(q:SC[A]):SC[A] = par(p,q)
     def <+>(q:SC[A]):SC[A] = append(p,q)
-    def >>=[B](f:A=>SC[B]):SC[B] = bind(p,f)
-    def >>[B](q:SC[B]):SC[B] = p >>= (_=>q) 
     def butAfter(l:Long, q:SC[A]):SC[A] = cut(p <|> (delay(l) >> q))
     def orElse(q:SC[A]):SC[A] = for {
   		tripwire <- liftIO(newEmptyMVar[Unit])
@@ -93,13 +106,6 @@ trait Scorch {
   implicit def SCOperator[A](sc:SC[A]):SCOperator[A] = new SCOperator[A](sc)
     // does this already exist in scalaz?
 
-//  XXX should make these two generic for all Monads.
-//  class PimpMyMonad[M[_],A](val p:M[A], val dict:Monad[M]) {
-//    def >>=[B](f:A=>M[B]):M[B] = dict.bind(p,f)
-//    def >>[B](q:M[B]):M[B] = p >>= (_=>q) 
-//  }
-//  implicit def PimpMyMonad[M[_],A](p:M[A])(implicit dict:Monad[M]):PimpMyMonad[M,A] = new PimpMyMonad[M,A](p, dict)
-
     // why do we need to declare the type variable binding for 'stop'?
   def liftList[A](as:List[A]):SC[A] = as.map(result).foldRight(stop[A])(_ <|> _)
     // maybe a funkier way of doing it...
@@ -115,13 +121,6 @@ trait Scorch {
 trait IOModule {
   type IO[A] 
   implicit def IOMonad[A]:Monad[IO]
-
-   // XXX generalise to Monads
-  class IOOperator[A](val p:IO[A]) {
-	  def >>=[B](f:A=>IO[B]):IO[B] = implicitly[Bind[IO]].bind(p,f)
-	  def >>[B](q:IO[B]):IO[B] = p >>= (_=>q) 
-  }
-  implicit def IOOperator[A](io:IO[A]):IOOperator[A] = new IOOperator[A](io)
 
   def result[A](a:A):IO[A] = implicitly[Monad[IO]].pure(a)
 
@@ -154,12 +153,6 @@ trait IOModule {
 
   type HIO[A]
   implicit def HIOMonad[A]:Monad[HIO]
-   // XXX generalise to Monads
-  class HIOOperator[A](val p:HIO[A]) {
-	  def >>=[B](f:A=>HIO[B]):HIO[B] = implicitly[Bind[HIO]].bind(p,f)
-	  def >>[B](q:HIO[B]):HIO[B] = p >>= (_=>q) 
-  }
-  implicit def HIOOperator[A](io:HIO[A]):HIOOperator[A] = new HIOOperator[A](io)
   def runHIO[A](p:HIO[A]):IO[Unit]
 
   trait Group  {
@@ -240,8 +233,8 @@ trait Examples extends Scorch {
   def parallelOr(p:SC[Boolean], q:SC[Boolean]):SC[Boolean] = for {
   	ox <- eagerly(p)
   	oy <- eagerly(q)
-	c  <- ( cut((ox >>= guard _) >> result(true)) <|>
-	        cut((oy >>= guard _) >> result(true)) <|>
+	c  <- ( cut((ox >>- guard _) >> result(true)) <|>
+	        cut((oy >>- guard _) >> result(true)) <|>
 	       (pureF(or) <*> ox <*> oy) 
 	      )
     } yield c
@@ -259,8 +252,8 @@ trait Examples extends Scorch {
 	quoteB <- eagerly (getQuote(srcB))
 	c      <- cut(
 			(pureF(least) <*> quoteA <*> quoteB) <|>
-			(quoteA >>= threshold)              <|>
-			(quoteB >>= threshold)              <|>
+			(quoteA >>- threshold)              <|>
+			(quoteB >>- threshold)              <|>
 			(delay(25) >> (quoteA <|> quoteB))  <|>
 			(delay(30) >> result(noQuote))
 		  )

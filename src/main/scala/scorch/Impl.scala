@@ -6,6 +6,8 @@ package scorch
 import scalaz._
 import Scalaz._
 
+import Pimpz._
+
   // XXX put this into a separate source file
 object ContinuationMonad {
   type Continuation[K,A] = (A=>K)=>K
@@ -31,10 +33,10 @@ object Impl extends Scorch {
   implicit def SCMonad[A]:Monad[SC] = ContinuationM
 /* should be like this
   implicit def SCLiftIO[A]:LiftIO[SC] = new LiftIO[SC] {
-    def liftIO[A](ioa:IO[A]):SC[A] = k => ioa >>= k
+    def liftIO[A](ioa:IO[A]):SC[A] = k => ioa >>- k
   }
 */
-  def liftIO[A](ioa:IO[A]):SC[A] = k => liftIO_H(ioa) >>= k
+  def liftIO[A](ioa:IO[A]):SC[A] = k => liftIO_H(ioa) >>- k
 
     // why do we need the 'implicitly'?
   def result[A](a:A):SC[A] = implicitly[Monad[SC]].pure(a)
@@ -43,11 +45,11 @@ object Impl extends Scorch {
 	res <- liftIO_H(newEmptyMVar[A])
 	g <- newGroup
 	_ <- local(g, forkActorH(saveOnce(p, res,g)))
-	r <- k(k2 => liftIO_H(readMVar(res)) >>= k2)
+	r <- k(k2 => liftIO_H(readMVar(res)) >>- k2)
   } yield r
   def saveOnce[A](p:SC[A], r:MVar[A], g:Group):HIO[Unit] = for {
 	ticket <- liftIO_H(newMVar[Unit](()))
-	_ <- p(x => (liftIO_H(tryTakeMVar(ticket) >>= 
+	_ <- p(x => (liftIO_H(tryTakeMVar(ticket) >>- 
 			(t => (if (t == None) doNothing else putMVar(r,x) )))))
 			// need to stop here instead of doNothing
 			//(t => (if (t == None) stop else putMVar(r,x) ))))
@@ -67,21 +69,13 @@ object Impl extends Scorch {
 		_ <- finished(g)
 		_ <- q(k)
 	} yield ()
-/*
-  def append[A](p:SC[A], q:SC[A]):SC[A]= k => for {
-		g  <- newGroup
-		_  <- g.local(forkActor(p(k)))
-		_  <- g.finished
-		qq <- q(k)
-	} yield qq
-*/
 
     // should get this for free from MonadPlus/Applicative or somesuch?
   def guard(b:Boolean):SC[Unit]= if (b) result(()) else stop
 
-  def applySC[A,B](fs:SC[A=>B], p:SC[A]):SC[B] = fs >>= (f => liftApply(f,p))
+  def applySC[A,B](fs:SC[A=>B], p:SC[A]):SC[B] = fs >>- (f => liftApply(f,p))
 
-  def liftApply[A,B](f:A=>B, p:SC[A]):SC[B] = p >>= (a => result(f(a)))
+  def liftApply[A,B](f:A=>B, p:SC[A]):SC[B] = p >>- (a => result(f(a)))
 }
 
 object IOImpl extends IOModule {
@@ -203,7 +197,7 @@ object IOImpl extends IOModule {
   implicit def HIOMonad[A]:Monad[HIO] = new Monad[HIO] {
     override def pure[A](a: => A):HIO[A] = _ => result(a)
     override def bind[A,B](p:HIO[A], h:A=>HIO[B]):HIO[B] = 
-	g => (p(g) >>= (a => h(a)(g)))
+	g => (p(g) >>- (a => h(a)(g)))
   }
   def runHIO[A](p:HIO[A]):IO[Unit] = for {
 	g <- newPrimGroup
