@@ -6,18 +6,6 @@ package scorch
 import scalaz._
 import Scalaz._
 
-object Pimpz {
-  class BindOps[M[_]:Bind,A](p:M[A]) {
-      // I would call this '>>=' rather than '>>- to be consistent with
-      // Haskell but this casuses some problems as operators ending in '='
-      // are treated specially in Scala.
-      // (would =>> be a better operator name?)
-    def >>-[B](f:A=>M[B]):M[B] = implicitly[Bind[M]].bind(p,f)
-    def >>[B](q:M[B]):M[B] = p >>- (_=>q) 
-  }
-  implicit def BindOps[M[_]:Bind,A](p:M[A]):BindOps[M,A] = new BindOps[M,A](p)
-}
-
 import Pimpz._
 
 trait Scorch {
@@ -30,13 +18,8 @@ trait Scorch {
     // and there is a monad instance (implicit) for it
   implicit def SCMonad[A]:Monad[SC]
 
-/* XXX should be like this:
-  trait LiftIO[M[_]] {
-    def liftIO[A](a:IO[A]):M[A]
-  }
-  implicit def SCLiftIOLiftIO[SC]
-*/
-  def liftIO[A](a:IO[A]):SC[A]
+  implicit def SCLiftIO:LiftIO[SC]
+  def liftIO_SC[A](ioa:IO[A]):SC[A] = implicitly[LiftIO[SC]].liftIO(ioa) 
 
       // Not needed? result(a) == in Pure[SC].pure(a)
   def result[A](a:A):SC[A]
@@ -78,12 +61,12 @@ trait Scorch {
     } yield ro
   def const[A,B] = (a:A)=>(b:B)=>a
 
-  def delay(l:Long):SC[Unit] = liftIO(threadDelay(l))
+  def delay(l:Long):SC[Unit] = liftIO_SC(threadDelay(l))
 
   def printSC[A](a:SC[A]):IO[Unit] =
   	runSC(for {
 		x <- a
-		_ <- liftIO(putStrLn("Ans = " ++ a.toString))
+		_ <- liftIO_SC(putStrLn("Ans = " ++ a.toString))
 	} yield ())
 
     // operator versions of the above, and some other useful operators
@@ -92,12 +75,12 @@ trait Scorch {
     def <+>(q:SC[A]):SC[A] = append(p,q)
     def butAfter(l:Long, q:SC[A]):SC[A] = cut(p <|> (delay(l) >> q))
     def orElse(q:SC[A]):SC[A] = for {
-  		tripwire <- liftIO(newEmptyMVar[Unit])
+  		tripwire <- liftIO_SC(newEmptyMVar[Unit])
 		a <- (for {
 				x <- p
-				_ <- liftIO(tryPutMVar[Unit](tripwire, ()))
+				_ <- liftIO_SC(tryPutMVar[Unit](tripwire, ()))
 			} yield x) <+> (for {
-				triggered <- liftIO(tryTakeMVar[Unit](tripwire))
+				triggered <- liftIO_SC(tryTakeMVar[Unit](tripwire))
 				theRest <- (if (triggered == None) q else stop)
 			} yield theRest)
 	} yield a
@@ -125,6 +108,10 @@ trait IOModule {
   def result[A](a:A):IO[A] = implicitly[Monad[IO]].pure(a)
 
   def unsafePerformIO[A](sideAffectingCode: =>A):IO[A]
+
+  trait LiftIO[M[_]] {
+    def liftIO[A](a:IO[A]):M[A]
+  }
 
   type MVar[A]
   def newEmptyMVar[A]:IO[MVar[A]]
@@ -172,8 +159,9 @@ trait IOModule {
 
   def newPrimGroup:IO[Group]
 
-	//XXX _H
-  def liftIO_H[A](ioa:IO[A]):HIO[A] 
+  implicit def HIOLiftIO:LiftIO[HIO]
+    // XXX shouldn't need this(?) but in some circumstances I do for some reason
+  def liftIO_H[A](ioa:IO[A]):HIO[A] = implicitly[LiftIO[HIO]].liftIO(ioa) 
 
   def forkActorH(hio:HIO[Unit]):HIO[Unit] 
 
@@ -204,30 +192,30 @@ trait Examples extends Scorch {
   def conflicts(xs:List[Int], j:Int):Boolean = true // XXX
 
   def scan[A,S](f:A=>S=>S, s:S, p:SC[A]):SC[S] = for {
-  	accum <- liftIO(newTVar[S](s))
+  	accum <- liftIO_SC(newTVar[S](s))
 	x <- p
-	w <- liftIO(modifyTVar(accum, f(x)))
+	w <- liftIO_SC(modifyTVar(accum, f(x)))
     } yield w._2
 
   def count[A](p:SC[A]):SC[Either[A,Int]] = for {
-  	accum <- liftIO(newTVar(0))
+  	accum <- liftIO_SC(newTVar(0))
 	eai <- (for {
 			x <- p
-			_ <- liftIO(modifyTVar(accum, (_:Int)+1))
+			_ <- liftIO_SC(modifyTVar(accum, (_:Int)+1))
 		} yield Left(x):Either[A,Int]) <+> 
 		(for {
-			c <- liftIO(readTVar(accum))
+			c <- liftIO_SC(readTVar(accum))
 		} yield Right[A,Int](c):Either[A,Int])
     } yield eai
 
   def collect[A](p:SC[A]):SC[List[A]] = for {
-  	accum <- liftIO(newTVar[List[A]](List()))
+  	accum <- liftIO_SC(newTVar[List[A]](List()))
 	as <- (for {
 			x <- p
-			_ <- liftIO(modifyTVar[List[A]](accum, 
+			_ <- liftIO_SC(modifyTVar[List[A]](accum, 
 					(xs:List[A])=>x::xs))
 			s <- stop[List[A]]
-		} yield s) <+> liftIO(readTVar[List[A]](accum))
+		} yield s) <+> liftIO_SC(readTVar[List[A]](accum))
     } yield as
 
   def parallelOr(p:SC[Boolean], q:SC[Boolean]):SC[Boolean] = for {
@@ -261,7 +249,7 @@ trait Examples extends Scorch {
 
   def email(to:String, msg:String):IO[Unit]
   def hassle:SC[Unit] = 
-  	(metronome >> liftIO(email("Simon","Hey!")) >> stop).
+  	(metronome >> liftIO_SC(email("Simon","Hey!")) >> stop).
 		butAfter(60, result(()) )
   
   // examples in paper from Orction onwards not yet done

@@ -8,19 +8,6 @@ import Scalaz._
 
 import Pimpz._
 
-  // XXX put this into a separate source file
-object ContinuationMonad {
-  type Continuation[K,A] = (A=>K)=>K
-  implicit def ContinuationM[K]:Monad[({type l[A] = Continuation[K,A]})#l] = 
-  		new Monad[({type l[A] = Continuation[K,A]})#l] {
-    override def pure[A](a: => A) = (f => f(a))
-    override def bind[A, B](p: Continuation[K,A], h:A=>Continuation[K,B]) = 
-    	bk => p(a => h(a)(bk))
-  }
-  def callCC[K,A,B](f:(A=>Continuation[K,B])=>Continuation[K,A]):Continuation[K,A] = 
-  	k => f(a => (_ => k(a)))(k)
-}
-
 object Impl extends Scorch {
   val io:IOModule = IOImpl
   import io._
@@ -31,12 +18,10 @@ object Impl extends Scorch {
 
   type SC[A] = Continuation[HIO[Unit],A]
   implicit def SCMonad[A]:Monad[SC] = ContinuationM
-/* should be like this
-  implicit def SCLiftIO[A]:LiftIO[SC] = new LiftIO[SC] {
-    def liftIO[A](ioa:IO[A]):SC[A] = k => ioa >>- k
+  implicit def SCLiftIO:LiftIO[SC] = new LiftIO[SC] {
+    def liftIO[A](ioa:IO[A]):SC[A] = 
+    		k => implicitly[LiftIO[HIO]].liftIO(ioa) >>- k
   }
-*/
-  def liftIO[A](ioa:IO[A]):SC[A] = k => liftIO_H(ioa) >>- k
 
     // why do we need the 'implicitly'?
   def result[A](a:A):SC[A] = implicitly[Monad[SC]].pure(a)
@@ -243,7 +228,9 @@ object IOImpl extends IOModule {
 	waiting <- newTVar[List[MVar[Unit]]](List())
   } yield new GroupImpl(n, mutex, waiting)
 
-  def liftIO_H[A](ioa:IO[A]):HIO[A]  = _ => ioa
+  implicit def HIOLiftIO:LiftIO[HIO] = new LiftIO[HIO] {
+    def liftIO[A](ioa:IO[A]):HIO[A] = _ => ioa
+  }
 
    // XXX exception handling
   def forkActorH(hio:HIO[Unit]):HIO[Unit]  = 
