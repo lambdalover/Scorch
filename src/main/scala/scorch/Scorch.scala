@@ -19,10 +19,11 @@ trait Scorch {
   implicit def SCMonad[A]:Monad[SC]
 
   implicit def SCLiftIO:LiftIO[SC]
+    // XXX shouldn't need this(?) but in some circumstances I do for some reason
   def liftIO_SC[A](ioa:IO[A]):SC[A] = implicitly[LiftIO[SC]].liftIO(ioa) 
 
-      // Not needed? result(a) == in Pure[SC].pure(a)
-  def result[A](a:A):SC[A]
+    // why do we need the 'implicitly'?
+  def result[A](a:A):SC[A] = implicitly[Pure[SC]].pure(a)
 
   def stop[A]:SC[A]
   def eagerly[A](a:SC[A]):SC[SC[A]]
@@ -30,24 +31,20 @@ trait Scorch {
 
   def par[A](p:SC[A], q:SC[A]):SC[A]
   def append[A](p:SC[A], q:SC[A]):SC[A]
-    // not sure this is really needed as it's forwarding on an implicit...
-  def bind[A,B](p:SC[A], f:A=>SC[B]):SC[B]= implicitly[Monad[SC]].bind(p,f)
 
-  // should get the following for free from MonadPlus/Applicative?
-  def guard(b:Boolean):SC[Unit]
-    // is 'pure' any different to 'result'?
-  //def pure[A](a:A):SC[A]
+    // should get this for free from MonadPlus/Applicative or somesuch?
+  def guard(b:Boolean):SC[Unit]= if (b) result(()) else stop
+
     // I'm just using pureF for lifting functions, with a function-specific
     // signature to avoid a bit of explicit currying when I use it
   def pureF[A,B](f:A=>B):SC[A=>B] = result(f)
 
-  def applySC[A,B](f:SC[A=>B], a:SC[A]):SC[B]
+  def applySC[A,B](fs:SC[A=>B], p:SC[A]):SC[B] = fs >>- (f => liftApply(f,p))
   class SCApply[A,B](val f:SC[A=>B]) {
 	  def <*>(a:SC[A]):SC[B] = applySC(f, a)
   }
   implicit def SCApply[A,B](f:SC[A=>B]) = new SCApply(f)
-
-  def liftApply[A,B](f:A=>B, a:SC[A]):SC[B]
+  def liftApply[A,B](f:A=>B, p:SC[A]):SC[B] = p >>- (a => result(f(a)))
   class LiftApply[A,B](val f:A=>B) {
 	    // would use <$> but that's not a valid operator...
 	  def <#>(a:SC[A]):SC[B] = liftApply(f, a)
@@ -87,14 +84,12 @@ trait Scorch {
     def notBefore(w:Long):SC[A] = sync(const[A,Unit], p, delay(w))
   }
   implicit def SCOperator[A](sc:SC[A]):SCOperator[A] = new SCOperator[A](sc)
-    // does this already exist in scalaz?
 
     // why do we need to declare the type variable binding for 'stop'?
   def liftList[A](as:List[A]):SC[A] = as.map(result).foldRight(stop[A])(_ <|> _)
     // maybe a funkier way of doing it...
   def liftList2[A](as:List[A]):SC[A] = as.foldRight(stop[A])(result(_) <|> _)
 
-  //def cut[A](p:SC[A]):SC[A] = p.join compose eagerly
   def cut[A](p:SC[A]):SC[A] = for {
   	ox <- eagerly(p)
 	x <- ox
@@ -108,6 +103,7 @@ trait IOModule {
   def result[A](a:A):IO[A] = implicitly[Monad[IO]].pure(a)
 
   def unsafePerformIO[A](sideAffectingCode: =>A):IO[A]
+  def toplevelRunIO[A](io:IO[A]):A 
 
   trait LiftIO[M[_]] {
     def liftIO[A](a:IO[A]):M[A]

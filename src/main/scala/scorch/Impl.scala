@@ -23,8 +23,6 @@ object Impl extends Scorch {
     		k => implicitly[LiftIO[HIO]].liftIO(ioa) >>- k
   }
 
-    // why do we need the 'implicitly'?
-  def result[A](a:A):SC[A] = implicitly[Monad[SC]].pure(a)
   def stop[A]:SC[A] = _ => liftIO_H(doNothing)
   def eagerly[A](p:SC[A]):SC[SC[A]] = k => for {
 	res <- liftIO_H(newEmptyMVar[A])
@@ -54,18 +52,13 @@ object Impl extends Scorch {
 		_ <- finished(g)
 		_ <- q(k)
 	} yield ()
-
-    // should get this for free from MonadPlus/Applicative or somesuch?
-  def guard(b:Boolean):SC[Unit]= if (b) result(()) else stop
-
-  def applySC[A,B](fs:SC[A=>B], p:SC[A]):SC[B] = fs >>- (f => liftApply(f,p))
-
-  def liftApply[A,B](f:A=>B, p:SC[A]):SC[B] = p >>- (a => result(f(a)))
 }
 
 object IOImpl extends IOModule {
   def UNDEFINED[T]:T = error("UNDEFINED")
 
+   // just like type IO[A] = TheWorld => (TheWorld,A)
+   // where TheWorld = Unit
   type IO[A] = (Unit=>A)
   implicit def IOMonad[A]:Monad[IO] = new Monad[IO] {
     override def pure[A](a: => A):IO[A] = _ => a
